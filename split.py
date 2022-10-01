@@ -1,49 +1,76 @@
 import subprocess
 import sys
+import ffmpeg
+import pathlib
+from nicelog import setup_logging
+from nicelog.formatters import Colorful
+import logging 
+
+handler = logging.StreamHandler(sys.stderr)
+handler.setFormatter(Colorful(
+    show_date=True,
+    show_function=True,
+    show_filename=True,
+    message_inline=True,
+    ))
+handler.setLevel(logging.DEBUG)
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
 
 
-def main():
-    """split a music track into specified sub-tracks by calling ffmpeg from the shell"""
+def get_file_duration(filename) :
+  try : 
+    probe = ffmpeg.probe(filename, format="duration")
+    return probe['streams'][0]['duration'] 
+  except  ffmpeg.Error as e:
+    print('stdout:', e.stdout.decode('utf8'))
+    print('stderr:', e.stderr.decode('utf8'))
+    raise e
 
-    # check command line for original file and track list file
-    if len(sys.argv) != 3:
-        print("usage: split <original_track> <segment_length>")
-        exit(1)
 
-    # record command line args
-    original_track = sys.argv[1]
-    track_list = sys.argv[2]
+def generate_interval(file, outfile, start, end ):
+  stream = ffmpeg.input(file, ss=start, t=end)
+  stream = ffmpeg.output(stream, outfile)
+  ffmpeg.run(stream)
 
-    # create a template of the ffmpeg call in advance
-    cmd_string = f'ffmpeg -i {tr} -acodec copy -ss {st} -to {en} {nm}.opus'
 
-    # read each line of the track list and split into start, end, name
-    with open(track_list, 'r') as f:
-        for line in f:
-            # skip comment and empty lines
-            if line.startswith('#') or len(line) <= 1:
-                continue
+def validate_args(file, inf, of) :
+  if not file.exists :
+    logger.error(f"input file:{file} not found")
+    return False
 
-            # create command string for a given track
-            start, end, name = line.strip().split()
-            command = cmd_string.format(
-                tr=original_track, st=start, en=end, nm=name)
+  if inf not in ['.mp3', '.ogg'] :
+    logger.error(f"unsupported input format")
+    return False  
 
-            # use subprocess to execute the command in the shell
-            subprocess.call(command, shell=True)
-
-    return None
-
+  if of not in ['.mp3', '.ogg'] :
+    logger.error(f"unsupported output format")
+    return False
+  
+  return True
 
 if __name__ == '__main__':
   import argparse
-  parser = argparse.ArgumentParser(description='simple utility to segment an audio file')
-  parser.add_argument('integers', metavar='N', type=int, nargs='+',
-                      help='an integer for the accumulator')
-  parser.add_argument('--sum', dest='accumulate', action='store_const',
-                      const=sum, default=max,
-                      help='sum the integers (default: find the max)')
-
+  parser = argparse.ArgumentParser(description='simple utility to segment an audio file with ffmpeg')
+  parser.add_argument('--interval',         "-v", help="segment interval in seconds [default: 15] ", default=15)
+  parser.add_argument('--input-audio',      "-i", help="source file", required=True)
+  parser.add_argument('--output-directory', "-d", help="output directory to store the segments [default: out]", default="out")
+  parser.add_argument('--manifest-file',    "-m", help="name of manifest file [default: <file-name>.<format>]")
+  parser.add_argument('--filename-format',  "-s", help="printf style format string for the output files [default: <file-name>-<%d>.<output-format>]")
+  parser.add_argument('--output-format',    "-f", help="output media format for segment files [default: <input-format>]")
   args = parser.parse_args()
-  print(args.accumulate(args.integers))
-  main()
+  infile = pathlib.Path(args.input_audio)
+  if args.output_format is None :
+    args.output_format = infile.suffix
+  if not validate_args(infile, infile.suffix, args.output_format) :
+    logger.error("argument validation error. exiting...")
+    exit(-1)
+
+  
+  duration = get_file_duration(infile)
+  intervals = float(duration)/int(args.interval)
+  logger.info(f"{duration} producing {intervals} intervals to {args.output_directory}")  
+  
+  generate_interval(infile, "blah.ogg", 0, int(args.interval))
+
