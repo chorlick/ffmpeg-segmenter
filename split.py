@@ -31,7 +31,9 @@ def get_file_duration(filename) :
 
 def generate_interval(file, outfile, start, end ):
   stream = ffmpeg.input(file, ss=start, t=end)
+  
   stream = ffmpeg.output(stream, outfile)
+  
   ffmpeg.run(stream)
 
 
@@ -67,10 +69,20 @@ if __name__ == '__main__':
     logger.error("argument validation error. exiting...")
     exit(-1)
 
+  outdir = pathlib.Path(args.output_directory)
+  if not outdir.exists() :
+    outdir.mkdir()
   
   duration = get_file_duration(infile)
   intervals = float(duration)/int(args.interval)
   logger.info(f"{duration} producing {intervals} intervals to {args.output_directory}")  
-  
-  generate_interval(infile, "blah.ogg", 0, int(args.interval))
+  stem = infile.stem
+  i = 0
+  while i < intervals:
+    path = pathlib.Path(outdir, f"{stem}-{i:03}{args.output_format}")
+    logger.info(f"writing {path}")
+    generate_interval(infile, str(path), int(args.interval) * i, int(args.interval))
+    i += 1
+
+
 
